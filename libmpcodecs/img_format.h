@@ -304,7 +304,20 @@ static inline int normalize_yuvp16(int fmt) {
 #define IMGFMT_VDPAU_MPEG4         (IMGFMT_VDPAU|0x06)
 #define IMGFMT_VDPAU_HEVC          (IMGFMT_VDPAU|0x07)
 
-#define IMGFMT_IS_HWACCEL(fmt) (IMGFMT_IS_VDPAU(fmt) || IMGFMT_IS_XVMC(fmt))
+#define IMGFMT_VAAPI               0x1DC90000
+#define IMGFMT_VAAPI_MASK          0xFFFF0000
+#define IMGFMT_IS_VAAPI(fmt)       (((fmt) & IMGFMT_VAAPI_MASK) == IMGFMT_VAAPI)
+// (Or values match the VAProfile in libva, in case that's ever useful.)
+#define IMGFMT_VAAPI_MPEG2         (IMGFMT_VAAPI | 1)
+#define IMGFMT_VAAPI_MPEG4         (IMGFMT_VAAPI | 3)
+#define IMGFMT_VAAPI_H264          (IMGFMT_VAAPI | 7)
+#define IMGFMT_VAAPI_WMV3          (IMGFMT_VAAPI | 9)
+#define IMGFMT_VAAPI_VC1           (IMGFMT_VAAPI | 10)
+#define IMGFMT_VAAPI_H263          (IMGFMT_VAAPI | 11)
+#define IMGFMT_VAAPI_HEVC          (IMGFMT_VAAPI | 17)
+
+#define IMGFMT_IS_HWACCEL(fmt) (IMGFMT_IS_VDPAU(fmt) || IMGFMT_IS_XVMC(fmt) || \
+                                IMGFMT_IS_VAAPI(fmt))
 
 typedef struct {
     void* data;

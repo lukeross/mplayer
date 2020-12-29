@@ -320,4 +320,9 @@ extern void (GLAPIENTRY *mpglFreeMemoryMESA)(void *, int, void *);
 extern XVisualInfo *gui_vinfo;
 #endif
 
+extern void (GLAPIENTRY *mpglXBindTexImage)(Display *, GLXDrawable, int, const int *);
+extern void (GLAPIENTRY *mpglXReleaseTexImage)(Display *, GLXDrawable, int);
+extern GLXPixmap (GLAPIENTRY *mpglXCreatePixmap)(Display *, GLXFBConfig, Pixmap, const int *);
+extern void (GLAPIENTRY *mpglXDestroyPixmap)(Display *, GLXPixmap);
+
 #endif /* MPLAYER_GL_COMMON_H */

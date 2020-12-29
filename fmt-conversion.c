@@ -147,6 +147,7 @@ enum AVPixelFormat imgfmt2pixfmt(int fmt)
     int i;
     enum AVPixelFormat pix_fmt;
     if (IMGFMT_IS_VDPAU(fmt)) return AV_PIX_FMT_VDPAU;
+    if (IMGFMT_IS_VAAPI(fmt)) return AV_PIX_FMT_VAAPI;
     for (i = 0; conversion_map[i].fmt; i++)
         if (conversion_map[i].fmt == fmt)
             break;

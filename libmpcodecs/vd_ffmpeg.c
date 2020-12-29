@@ -41,6 +41,22 @@
 #include "libavcodec/vdpau.h"
 #include "vdpau_frame_data.h"
 #endif
+
+#if CONFIG_VAAPI
+#include "libavcodec/vaapi.h"
+
+/* Hack: the struct vaapi_context is actually held in the vaapi output driver,
+ * so we need to fetch it from there.  Provide a stub implementation here in
+ * order to keep the linker happy if we didn't link the output driver in (for
+ * example, in mencoder) - VAAPI isn't going to work in that case anyway.
+ */
+void __attribute__((weak))
+vo_vaapi_fill_hwaccel_context(struct vaapi_context *hwaccel)
+{
+    assert(0);
+}
+#endif
+
 #include "libavutil/pixdesc.h"
 
 static const vd_info_t info = {
@@ -92,7 +108,11 @@ typedef struct {
     int b_count;
     AVRational last_sample_aspect_ratio;
     int palette_sent;
-    int use_vdpau;
+    enum {
+        HWACCEL_MODE_NONE,
+        HWACCEL_MODE_VDPAU,
+        HWACCEL_MODE_VAAPI,
+    } hwaccel_mode;
 } vd_ffmpeg_ctx;
 
 #include "m_option.h"
@@ -240,6 +260,16 @@ static int pixfmt2imgfmt2(enum AVPixelFormat fmt, enum AVCodecID cid)
         case AV_CODEC_ID_VC1:        return IMGFMT_VDPAU_VC1;
         case AV_CODEC_ID_HEVC:       return IMGFMT_VDPAU_HEVC;
         }
+    if (fmt == AV_PIX_FMT_VAAPI)
+        switch (cid) {
+        case AV_CODEC_ID_MPEG2VIDEO: return IMGFMT_VAAPI_MPEG2;
+        case AV_CODEC_ID_MPEG4:      return IMGFMT_VAAPI_MPEG4;
+        case AV_CODEC_ID_H264:       return IMGFMT_VAAPI_H264;
+        case AV_CODEC_ID_WMV3:       return IMGFMT_VAAPI_WMV3;
+        case AV_CODEC_ID_VC1:        return IMGFMT_VAAPI_VC1;
+        case AV_CODEC_ID_H263:       return IMGFMT_VAAPI_H263;
+        case AV_CODEC_ID_HEVC:       return IMGFMT_VAAPI_HEVC;
+        }
     return pixfmt2imgfmt(fmt);
 }
 
@@ -285,30 +315,52 @@ static void set_format_params(struct AVCodecContext *avctx,
     int imgfmt;
     if (fmt == AV_PIX_FMT_NONE)
         return;
-    ctx->use_vdpau = fmt == AV_PIX_FMT_VDPAU;
     imgfmt = pixfmt2imgfmt2(fmt, avctx->codec_id);
+    switch(fmt) {
 #if CONFIG_VDPAU
-    if (!ctx->use_vdpau) {
-        av_freep(&avctx->hwaccel_context);
-    } else {
-        AVVDPAUContext *vdpc = avctx->hwaccel_context;
-        if (!vdpc)
-            avctx->hwaccel_context = vdpc = av_alloc_vdpaucontext();
-        vdpc->render2 = vdpau_render_wrapper;
-    }
+    case AV_PIX_FMT_VDPAU:
+        ctx->hwaccel_mode = HWACCEL_MODE_VDPAU;
+        {
+            AVVDPAUContext *vdpc = avctx->hwaccel_context;
+            if (!vdpc)
+                avctx->hwaccel_context = vdpc = av_alloc_vdpaucontext();
+            vdpc->render2 = vdpau_render_wrapper;
+        }
+        break;
 #endif
+#if CONFIG_VAAPI
+    case AV_PIX_FMT_VAAPI:
+        ctx->hwaccel_mode = HWACCEL_MODE_VAAPI;
+        {
+            struct vaapi_context *vctx = avctx->hwaccel_context;
+            if(!vctx) {
+                // Just alloc here; it's filled later in when the vo is started.
+                vctx = calloc(1, sizeof(struct vaapi_context));
+                avctx->hwaccel_context = vctx;
+            }
+        }
+        break;
+#endif
+    default:
+        ctx->hwaccel_mode = HWACCEL_MODE_NONE;
+        av_freep(&avctx->hwaccel_context);
+        break;
+    }
     if (IMGFMT_IS_HWACCEL(imgfmt)) {
         ctx->do_dr1    = 1;
         ctx->nonref_dr = 0;
         avctx->get_buffer2 = get_buffer2;
-        mp_msg(MSGT_DECVIDEO, MSGL_V, IMGFMT_IS_XVMC(imgfmt) ?
-               MSGTR_MPCODECS_XVMCAcceleratedMPEG2 :
-               "[VD_FFMPEG] VDPAU accelerated decoding\n");
-        if (ctx->use_vdpau) {
+        if (ctx->hwaccel_mode == HWACCEL_MODE_VDPAU ||
+            ctx->hwaccel_mode == HWACCEL_MODE_VAAPI) {
+            mp_msg(MSGT_DECVIDEO, MSGL_V,
+                   ctx->hwaccel_mode == HWACCEL_MODE_VDPAU ?
+                   "[VD_FFMPEG] VDPAU accelerated decoding\n" :
+                   "[VD_FFMPEG] VAAPI accelerated decoding\n");
             avctx->draw_horiz_band = NULL;
             avctx->slice_flags = 0;
             ctx->do_slices = 0;
         } else {
+            mp_msg(MSGT_DECVIDEO, MSGL_V, MSGTR_MPCODECS_XVMCAcceleratedMPEG2);
             avctx->draw_horiz_band = draw_slice;
             avctx->slice_flags = SLICE_FLAG_CODED_ORDER|SLICE_FLAG_ALLOW_FIELD;
             ctx->do_slices = 1;
@@ -540,14 +592,17 @@ static void draw_slice(struct AVCodecContext *s,
     mp_image_t *mpi = src->opaque;
     sh_video_t *sh = s->opaque;
     vd_ffmpeg_ctx *ctx = sh->context;
-    uint8_t *source[MP_MAX_PLANES]= {src->data[0] + offset[0], src->data[1] + offset[1], src->data[2] + offset[2]};
+    uint8_t *source[MP_MAX_PLANES]= {
+        src->data[0] + offset[0], src->data[1] + offset[1],
+        src->data[2] + offset[2], src->data[3] + offset[3],
+    };
     int strides[MP_MAX_PLANES] = {src->linesize[0], src->linesize[1], src->linesize[2]};
     if (!src->data[0]) {
         mp_msg(MSGT_DECVIDEO, MSGL_FATAL, "BUG in FFmpeg, draw_slice called with NULL pointer!\n");
         return;
     }
-    if (mpi && ctx->use_vdpau) {
-        mp_msg(MSGT_DECVIDEO, MSGL_FATAL, "BUG in FFmpeg, draw_slice called for VDPAU!\n");
+    if (mpi && ctx->hwaccel_mode != HWACCEL_MODE_NONE) {
+        mp_msg(MSGT_DECVIDEO, MSGL_FATAL, "BUG in FFmpeg, draw_slice called in hwaccel mode!\n");
         return;
     }
     if (height < 0)
@@ -654,6 +709,10 @@ static int init_vo(sh_video_t *sh, enum AVPixelFormat pix_fmt, int ignore_aspect
         sh->disp_h = height;
         if (!mpcodecs_config_vo(sh, sh->disp_w, sh->disp_h, ctx->best_csp))
             return -1;
+#if CONFIG_VAAPI
+        if (IMGFMT_IS_VAAPI(imgfmt))
+            vo_vaapi_fill_hwaccel_context(avctx->hwaccel_context);
+#endif
         ctx->vo_initialized = 1;
     }
     return 0;
@@ -735,28 +794,33 @@ static int get_buffer(AVCodecContext *avctx, AVFrame *pic, int isreference){
         avctx->draw_horiz_band= draw_slice;
     } else
         avctx->draw_horiz_band= NULL;
+    switch(ctx->hwaccel_mode) {
 #if CONFIG_VDPAU
-    if (ctx->use_vdpau) {
-        VdpVideoSurface surface = (VdpVideoSurface)mpi->priv;
-        avctx->draw_horiz_band= NULL;
-        mpi->planes[3] = surface;
-    }
+    case HWACCEL_MODE_VDPAU:
+        {
+            VdpVideoSurface surface = (VdpVideoSurface)mpi->priv;
+            avctx->draw_horiz_band= NULL;
+            mpi->planes[3] = surface;
+        }
+        break;
 #endif
 #if CONFIG_XVMC
-    if(IMGFMT_IS_XVMC(mpi->imgfmt)) {
-        struct xvmc_pix_fmt *render = mpi->priv; //same as data[2]
-        if(!(mpi->flags & MP_IMGFLAG_DIRECT)) {
-            mp_msg(MSGT_DECVIDEO, MSGL_ERR, MSGTR_MPCODECS_OnlyBuffersAllocatedByVoXvmcAllowed);
-            assert(0);
-            return -1;//!!fixme check error conditions in ffmpeg
+    case HWACCEL_MODE_XVMC:
+        {
+            struct xvmc_pix_fmt *render = mpi->priv; //same as data[2]
+            if(!(mpi->flags & MP_IMGFLAG_DIRECT)) {
+                mp_msg(MSGT_DECVIDEO, MSGL_ERR, MSGTR_MPCODECS_OnlyBuffersAllocatedByVoXvmcAllowed);
+                assert(0);
+                return -1;//!!fixme check error conditions in ffmpeg
+            }
+            if(mp_msg_test(MSGT_DECVIDEO, MSGL_DBG5))
+                mp_msg(MSGT_DECVIDEO, MSGL_DBG5, "vd_ffmpeg::get_buffer (xvmc render=%p)\n", render);
+            assert(render != 0);
+            assert(render->xvmc_id == AV_XVMC_ID);
+            avctx->draw_horiz_band= draw_slice;
         }
-        if(mp_msg_test(MSGT_DECVIDEO, MSGL_DBG5))
-            mp_msg(MSGT_DECVIDEO, MSGL_DBG5, "vd_ffmpeg::get_buffer (xvmc render=%p)\n", render);
-        assert(render != 0);
-        assert(render->xvmc_id == AV_XVMC_ID);
-        avctx->draw_horiz_band= draw_slice;
-    }
 #endif
+    }
 
     pic->data[0]= mpi->planes[0];
     pic->data[1]= mpi->planes[1];

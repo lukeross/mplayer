@@ -496,8 +496,10 @@ Video output:
   --enable-dvb             enable DVB video output [autodetect]
   --enable-mga             enable mga_vid video output [autodetect]
   --enable-xmga            enable mga_vid X11 video output [autodetect]
+  --enable-xrender         enable Xrender video output [autodetect]
   --enable-xv              enable Xv video output [autodetect]
   --enable-xvmc            enable XvMC acceleration [disable]
+  --enable-vaapi           enable VA API acceleration [autodetect]
   --enable-vda             enable VDA acceleration [autodetect]
   --enable-vdpau           enable VDPAU acceleration [autodetect]
   --enable-vm              enable XF86VidMode support [autodetect]
@@ -614,6 +616,7 @@ Use these options if autodetection fails:
   --extra-libs-mplayer=FLAGS  extra linker flags for MPlayer
   --extra-libs-mencoder=FLAGS extra linker flags for MEncoder
   --with-xvmclib=NAME         adapter-specific library name (e.g. XvMCNVIDIA)
+  --with-vaapi-prefix=PATH    prefix to VA-API include and lib directories
 
   --with-freetype-config=PATH path to freetype-config
   --with-sdl-config=PATH      path to sdl*-config
@@ -694,6 +697,8 @@ _dga1=auto
 _dga2=auto
 _xv=auto
 _xvmc=no  #auto when complete
+_vaapi=auto
+_vaapi_glx=no
 _vda=auto
 _vdpau=auto
 _sdl=auto
@@ -774,6 +779,7 @@ _native_rtsp=yes
 _xinerama=auto
 _mga=auto
 _xmga=auto
+_xrender=auto
 _vm=auto
 _xf86keysym=auto
 _mlib=no #broken, thus disabled
@@ -929,6 +935,9 @@ for ac_option do
   --with-xvmclib=*)
     _xvmclib=$(option_value $ac_option)
     ;;
+  --with-vaapi-prefix=*)
+    _vaapiprefix=$(echo $ac_option | cut -d '=' -f 2)
+    ;;
 
   --with-sdl-config=*)
     _sdlconfig=$(option_value $ac_option)
@@ -1040,12 +1049,16 @@ for ac_option do
   --disable-x11)        _x11=no         ;;
   --enable-xshape)      _xshape=yes     ;;
   --disable-xshape)     _xshape=no      ;;
+  --enable-xrender)     _xrender=yes    ;;
+  --disable-xrender)    _xrender=no     ;;
   --enable-xss)         _xss=yes        ;;
   --disable-xss)        _xss=no         ;;
   --enable-xv)          _xv=yes         ;;
   --disable-xv)         _xv=no          ;;
   --enable-xvmc)        _xvmc=yes       ;;
   --disable-xvmc)       _xvmc=no        ;;
+  --enable-vaapi)       _vaapi=yes      ;;
+  --disable-vaapi)      _vaapi=no       ;;
   --enable-vda)         _vda=yes        ;;
   --disable-vda)        _vda=no         ;;
   --enable-vdpau)       _vdpau=yes      ;;
@@ -4950,6 +4963,30 @@ else
 fi
 
 
+echocheck "Xrender"
+if test "$_xrender" = auto ; then
+  cat > $TMPC <<EOF
+#include <X11/Xlib.h>
+#include <X11/extensions/Xrender.h>
+int main(void) {
+  (void) XRenderCreatePicture(0, 0, 0, 0, 0);
+  return 0; }
+EOF
+  _xrender=no
+  cc_check -lXrender && _xrender=yes
+fi
+
+if test "$_xrender" = yes ; then
+  def_xrender='#define CONFIG_XRENDER 1'
+  libs_mplayer="$libs_mplayer -lXrender"
+  vomodules="xrender $vomodules"
+else
+  def_xrender='#undef CONFIG_XRENDER'
+  novomodules="xrender $novomodules"
+fi
+echores "$_xrender"
+
+
 echocheck "Xv"
 if test "$_xv" = auto && test "$_x11" = yes ; then
   _xv=no
@@ -4996,6 +5033,38 @@ else
   libavdecoders=$(filter_out_component decoder 'MPEG_XVMC')
 fi
 echores "$_xvmc"
+
+
+echocheck "VA-API"
+if test -n "$_vaapiprefix"; then
+  _vaapiinc="-I$_vaapiprefix/include"
+  _vaapilib="-L$_vaapiprefix/lib"
+fi
+if test "$_vaapi" = yes -o "$_vaapi" = auto; then
+  _vaapi=no
+  statement_check 'va/va.h' 'int a[VA_CHECK_VERSION(0,34,0)-1]' $_vaapiinc $_vaapilib -lva && _vaapi=yes
+  return_check 'va/va.h' 'VAProfileHEVCMain' $_vaapiinc $_vaapilib -lva && _vaapi_hevc=yes
+fi
+if test "$_vaapi" = yes ; then
+  def_vaapi='#define CONFIG_VAAPI 1'
+  extra_cflags="$extra_cflags $_vaapiinc"
+  libs_mencoder="$libs_mencoder $_vaapilib -lva"
+  libs_mplayer="$libs_mplayer $_vaapilib -lva-x11 -lva"
+  vomodules="vaapi $vomodules"
+  libavhwaccels="$libavhwaccels MPEG2_VAAPI_HWACCEL MPEG4_VAAPI_HWACCEL H264_VAAPI_HWACCEL WMV3_VAAPI_HWACCEL VC1_VAAPI_HWACCEL H263_VAAPI_HWACCEL"
+  if test "$_vaapi_hevc" = yes ; then
+      libavhwaccels="$libavhwaccels HEVC_VAAPI_HWACCEL"
+  else
+      res_comment="no HEVC"
+  fi
+else
+  if header_check 'va/va.h' $_vaapiinc $_vaapilib -lva ; then
+    res_comment="too old - libva 1.2.0 or greater required"
+  fi
+  def_vaapi='#define CONFIG_VAAPI 0'
+  novomodules="vaapi $novomodules"
+fi
+echores "$_vaapi"
 
 
 echocheck "Video Decode Acceleration (VDA)"
@@ -5879,6 +5948,44 @@ else
   novomodules="opengl $novomodules"
 fi
 echores "$_gl"
+
+
+echocheck "OpenGL utilities (GLU)"
+_glu=no
+if test "$_gl" = yes; then
+  cat > $TMPC << EOF
+#include <GL/glu.h>
+int main(void) {
+  gluPerspective(0.0, 0.0, 0.0, 0.0);
+  return 0;
+}
+EOF
+  cc_check -lGLU && _glu=yes
+fi
+if test "$_glu" = yes; then
+  libs_mplayer="$libs_mplayer -lGLU"
+fi
+echores "$_glu"
+
+
+echocheck "VA-API (with GLX support)"
+if test "$_vaapi" = yes; then
+  _vaapi_glx=no
+  if test "$_gl" = "yes" -a "$_glu" = yes; then
+    cat > $TMPC <<EOF
+#include <va/va_glx.h>
+int main(void) { (void) vaGetDisplayGLX(0); return 0; }
+EOF
+    cc_check $_vaapiinc $_vaapilib -lva-glx -lva && _vaapi_glx=yes
+  fi
+fi
+if test "$_vaapi_glx" = yes; then
+  def_vaapi_glx='#define CONFIG_VAAPI_GLX 1'
+  libs_mplayer="$libs_mplayer -lva-glx -lva"
+else
+  def_vaapi_glx='#define CONFIG_VAAPI_GLX 0'
+fi
+echores "$_vaapi_glx"
 
 
 echocheck "MatrixView"
@@ -8789,6 +8896,7 @@ TWOLAME=$_twolame
 UNRAR_EXEC = $_unrar_exec
 V4L2 = $_v4l2
 VCD = $_vcd
+VAAPI = $_vaapi
 VDA = $_vda
 VDPAU = $_vdpau
 VESA = $_vesa
@@ -8982,8 +9090,10 @@ CONFIG_MUXERS   = yes
 CONFIG_NETWORK  = $networking
 CONFIG_RTPDEC   = $networking
 CONFIG_VF_LAVFI = $_vf_lavfi
+CONFIG_VAAPI    = $_vaapi
 CONFIG_VDA      = $_vda
 CONFIG_VDPAU    = $_vdpau
+CONFIG_XRENDER  = $_xrender
 CONFIG_XVMC     = $_xvmc
 CONFIG_ZLIB     = $_zlib
 
@@ -9369,6 +9479,8 @@ $def_tdfxfb
 $def_tdfxvid
 $def_tga
 $def_v4l2
+$def_vaapi
+$def_vaapi_glx
 $def_vdpau
 $def_vesa
 $def_vidix
@@ -9394,6 +9506,7 @@ $def_xf86keysym
 $def_xinerama
 $def_xmga
 $def_xss
+$def_xrender
 $def_xv
 $def_xvmc
 $def_xvr100
@@ -9538,7 +9651,6 @@ $def_openssl
 #define CONFIG_SWSCALE_ALPHA 1
 #define SWS_MAX_FILTER_SIZE 256
 #define CONFIG_QSV 0
-#define CONFIG_VAAPI 0
 
 #define HAVE_ALIGNED_STACK 1
 #define HAVE_AS_ARCH_DIRECTIVE 1
