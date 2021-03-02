@@ -75,6 +75,7 @@ const LIBVO_EXTERN(vaapi)
 #define NUM_VIDEO_SURFACES_VC1    3 /* 1 decode frame, up to  2 references */
 #define NUM_VIDEO_SURFACES_H263   3 /* 1 decode frame, up to  2 references */
 #define NUM_VIDEO_SURFACES_HEVC  21 /* 1 decode frame, up to 20 references */
+#define NUM_VIDEO_SURFACES_VP9   21 /* FIXME */
 
 static void ensure_osd(void);
 static int reset_xrender_specific(void);
@@ -249,6 +250,12 @@ static const char *string_of_VAProfile(VAProfile profile)
         PROFILE(HEVCMain);
         PROFILE(HEVCMain10);
 #endif
+#if VA_CHECK_VERSION(0,38,0)
+        PROFILE(VP9Profile0);
+#endif
+#if VA_CHECK_VERSION(0,39,0)
+        PROFILE(VP9Profile2);
+#endif
 #undef PROFILE
     default: break;
     }
@@ -304,6 +311,10 @@ static int VAProfile_from_imgfmt(uint32_t format)
     static const int hevc_profiles[] =
         { VAProfileHEVCMain, -1 };
 #endif
+#if VA_CHECK_VERSION(0,38,0)
+    static const int vp9_profiles[] =
+        { VAProfileVP9Profile0, -1 };
+#endif
 
     const int *profiles = NULL;
     switch (format) {
@@ -328,6 +339,11 @@ static int VAProfile_from_imgfmt(uint32_t format)
 #if VA_CHECK_VERSION(0,37,0)
     case IMGFMT_VAAPI_HEVC:
         profiles = hevc_profiles;
+        break;
+#endif
+#if VA_CHECK_VERSION(0,38,0)
+    case IMGFMT_VAAPI_VP9:
+        profiles = vp9_profiles;
         break;
 #endif
     }
@@ -364,6 +380,7 @@ static int VAEntrypoint_from_imgfmt(uint32_t format)
     case IMGFMT_VAAPI_VC1:
     case IMGFMT_VAAPI_H263:
     case IMGFMT_VAAPI_HEVC:
+    case IMGFMT_VAAPI_VP9:
         entrypoint = VAEntrypointVLD;
         break;
     }
@@ -1724,6 +1741,9 @@ static int config_vaapi(uint32_t width, uint32_t height, uint32_t format)
         case IMGFMT_VAAPI_HEVC:
             num_surfaces = NUM_VIDEO_SURFACES_HEVC;
             break;
+        case IMGFMT_VAAPI_VP9:
+            num_surfaces = NUM_VIDEO_SURFACES_VP9;
+            break;
         default:
             num_surfaces = 0;
             break;
@@ -1951,6 +1971,7 @@ static int query_format(uint32_t format)
     case IMGFMT_VAAPI_WMV3:
     case IMGFMT_VAAPI_VC1:
     case IMGFMT_VAAPI_HEVC:
+    case IMGFMT_VAAPI_VP9:
         return default_caps | VOCAP_NOSLICES;
     case IMGFMT_NV12:
     case IMGFMT_YV12:

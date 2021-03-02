@@ -5053,7 +5053,7 @@ if test "$_vaapi" = yes ; then
   vomodules="vaapi $vomodules"
   libavhwaccels="$libavhwaccels MPEG2_VAAPI_HWACCEL MPEG4_VAAPI_HWACCEL H264_VAAPI_HWACCEL WMV3_VAAPI_HWACCEL VC1_VAAPI_HWACCEL H263_VAAPI_HWACCEL"
   if test "$_vaapi_hevc" = yes ; then
-      libavhwaccels="$libavhwaccels HEVC_VAAPI_HWACCEL"
+      libavhwaccels="$libavhwaccels HEVC_VAAPI_HWACCEL VP9_VAAPI_HWACCEL"
   else
       res_comment="no HEVC"
   fi

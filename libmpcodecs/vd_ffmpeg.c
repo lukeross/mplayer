@@ -269,6 +269,7 @@ static int pixfmt2imgfmt2(enum AVPixelFormat fmt, enum AVCodecID cid)
         case AV_CODEC_ID_VC1:        return IMGFMT_VAAPI_VC1;
         case AV_CODEC_ID_H263:       return IMGFMT_VAAPI_H263;
         case AV_CODEC_ID_HEVC:       return IMGFMT_VAAPI_HEVC;
+        case AV_CODEC_ID_VP9:        return IMGFMT_VAAPI_VP9;
         }
     return pixfmt2imgfmt(fmt);
 }

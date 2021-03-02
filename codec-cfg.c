@@ -272,6 +272,7 @@ static const struct {
     {"VAAPI_WMV3",  IMGFMT_VAAPI_WMV3},
     {"VAAPI_VC1",   IMGFMT_VAAPI_VC1},
     {"VAAPI_HEVC",  IMGFMT_VAAPI_HEVC},
+    {"VAAPI_VP9",   IMGFMT_VAAPI_VP9},
 
     {NULL,    0}
 };

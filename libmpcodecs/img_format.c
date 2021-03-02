@@ -155,6 +155,7 @@ const char *vo_format_name(int format)
     case IMGFMT_VAAPI_VC1:       return "VC-1 VA-API Acceleration";
     case IMGFMT_VAAPI_H263:      return "H.263 VA-API Acceleration";
     case IMGFMT_VAAPI_HEVC:      return "HEVC VA-API Acceleration";
+    case IMGFMT_VAAPI_VP9:       return "VP9 VA-API Acceleration";
     }
     snprintf(unknown_format,20,"Unknown 0x%04x",format);
     return unknown_format;

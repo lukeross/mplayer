@@ -315,6 +315,7 @@ static inline int normalize_yuvp16(int fmt) {
 #define IMGFMT_VAAPI_VC1           (IMGFMT_VAAPI | 10)
 #define IMGFMT_VAAPI_H263          (IMGFMT_VAAPI | 11)
 #define IMGFMT_VAAPI_HEVC          (IMGFMT_VAAPI | 17)
+#define IMGFMT_VAAPI_VP9           (IMGFMT_VAAPI | 19)
 
 #define IMGFMT_IS_HWACCEL(fmt) (IMGFMT_IS_VDPAU(fmt) || IMGFMT_IS_XVMC(fmt) || \
                                 IMGFMT_IS_VAAPI(fmt))
